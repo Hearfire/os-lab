@@ -8,7 +8,13 @@
 #include "spinlock.h"
 #include "riscv.h"
 #include "defs.h"
-
+/*
+struct page_ref{
+  struct spinlock lock;
+  int cnt;
+} ;
+struct page_ref pageref[PAGEID(PHYSTOP)];*/
+uint64 pageref[PAGEID(PHYSTOP)];
 void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
@@ -26,7 +32,12 @@ struct {
 void
 kinit()
 {
+  //for(int i=0;i<PAGEID(PHYSTOP);i++){
+    //initlock(&pageref[PAGEID(i)].lock, "pageref");
+   // pageref[PAGEID(i)]=1;
+ // }
   initlock(&kmem.lock, "kmem");
+
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -35,8 +46,9 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE){    
     kfree(p);
+  }
 }
 
 // Free the page of physical memory pointed at by v,
@@ -50,6 +62,18 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
+ // acquire(&(pageref[PAGEID(pa)].lock));
+  
+  if(pageref[PAGEID(pa)]>1){   
+    //release(&(pageref[PAGEID(pa)].lock)); 
+    pageref[PAGEID(pa)]--;
+    return;
+  } 
+  pageref[PAGEID(pa)]=0;
+  
+ 
+ // release(&(pageref[PAGEID(pa)].lock)); 
+
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -76,7 +100,12 @@ kalloc(void)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+
+    //acquire(&(pageref[PAGEID(r)].lock));
+    pageref[PAGEID(r)]=1;
+    //release(&(pageref[PAGEID(r)].lock)); 
+  }
   return (void*)r;
 }

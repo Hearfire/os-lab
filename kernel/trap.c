@@ -11,6 +11,9 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+//extern struct page_ref;
+extern uint64 pageref[];
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -67,6 +70,13 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 15){//cow
+    uint64 addr=r_stval();
+
+    if(cowalloc(p->pagetable,addr)!=0){
+      p->killed=1;
+    }
+
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -81,6 +91,56 @@ usertrap(void)
     yield();
 
   usertrapret();
+}
+
+int
+cowalloc(pagetable_t pagetable,uint64 va){
+  pte_t *pte;  
+  
+  if(va>=MAXVA)return -1;
+  va=PGROUNDDOWN(va);
+
+  if((pte = walk(pagetable, va, 0)) == 0){
+    printf("cowalloc:pte\n");
+    return -1;
+  }
+  if((*pte & PTE_V) == 0){
+    printf("cowalloc:pte_V\n");
+    return -1;
+  }
+  if((*pte & PTE_C) == 0){
+    //printf("cowalloc:pte_C\n");
+    return -2;
+  }
+
+  uint64 pa = PTE2PA(*pte);
+ // acquire(&(pageref[PAGEID(pa)].lock));
+  if(pageref[PAGEID(pa)]==1){
+    *pte=(*pte&~PTE_C)|PTE_W;
+    //release(&(pageref[PAGEID(pa)].lock));
+    return 0;
+  }
+  //release(&(pageref[PAGEID(pa)].lock));
+
+  char *mem;
+  uint flags= PTE_FLAGS((*pte&~PTE_C)|PTE_W);
+  
+  if((mem = kalloc()) == 0)return -1;
+  memmove(mem, (char*)pa, PGSIZE); 
+  *pte=PA2PTE((uint64)mem)|flags;    
+  kfree((void*)pa);
+
+ /* if(mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0){
+    kfree(mem);
+   return -1;
+  }*/
+ // acquire(&(pageref[PAGEID(pa)].lock));
+ // pageref[PAGEID(pa)]--;
+  //release(&(pageref[PAGEID(pa)].lock));
+  return 0;
+  
+  
+
 }
 
 //
