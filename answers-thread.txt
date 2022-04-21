@@ -1,0 +1,1 @@
+two thread call insert simultaneously, pass the same *p,so lost an entry.
